@@ -59,6 +59,16 @@ if (catkin_FOUND AND ENABLE_ROS)
     ${ONNXRUNTIME_LIB}
   )
 
+  add_executable(slg_backend_smoke_test_hist
+    tests/slg_backend_smoke_test_hist.cpp
+  )
+  target_link_libraries(slg_backend_smoke_test_hist
+    ${PROJECT_NAME}
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBRARIES}
+    ${ONNXRUNTIME_LIB}
+  )
+
   add_executable(onnxrt_check
     tests/onnxrt_check.cpp
   )

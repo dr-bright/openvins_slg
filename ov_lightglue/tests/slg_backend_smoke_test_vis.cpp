@@ -2,13 +2,13 @@
  * Standalone visualization smoke test for ov_lightglue slg_backend.
  */
 
-#include "track/TrackSuperLightGlue.h"
 #include "track/slg_backend.h"
 
 #include <cstdlib>
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <string>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -138,10 +138,9 @@ int main(int argc, char **argv) {
     return 2;
   }
 
-  ov_lightglue::slg_config cfg;
-  cfg.superpoint_onnx_path = argv[1];
-  cfg.lightglue_onnx_path = argv[2];
-  cfg.use_gpu = (argc >= 6) ? (std::atoi(argv[5]) != 0) : true;
+  const std::string superpoint_onnx_path = argv[1];
+  const std::string lightglue_onnx_path = argv[2];
+  const bool use_gpu = (argc >= 6) ? (std::atoi(argv[5]) != 0) : true;
 
   const cv::Mat img0 = cv::imread(argv[3], cv::IMREAD_GRAYSCALE);
   const cv::Mat img1 = cv::imread(argv[4], cv::IMREAD_GRAYSCALE);
@@ -151,17 +150,17 @@ int main(int argc, char **argv) {
   }
 
   try {
-    ov_lightglue::slg_backend backend(cfg, ORT_LOGGING_LEVEL_INFO);
+    ov_lightglue::slg_backend backend(superpoint_onnx_path, lightglue_onnx_path, use_gpu, ov_lightglue::slg_backend::log_level::info);
 
     std::vector<cv::KeyPoint> kpts0;
     std::vector<cv::KeyPoint> kpts1;
     cv::Mat desc0;
     cv::Mat desc1;
-    backend.run_superpoint(img0, kpts0, desc0);
-    backend.run_superpoint(img1, kpts1, desc1);
+    backend.run_superpoint(img0, kpts0, desc0, 1024, -1.0f);
+    backend.run_superpoint(img1, kpts1, desc1, 1024, -1.0f);
 
     std::vector<cv::DMatch> matches;
-    backend.run_lightglue(kpts0, desc0, kpts1, desc1, matches);
+    backend.run_lightglue(img0.size(), kpts0, desc0, img1.size(), kpts1, desc1, matches, -1.0f);
 
     std::cout << "kpts0=" << kpts0.size() << " kpts1=" << kpts1.size() << " matches=" << matches.size() << std::endl;
     std::cout << "Controls: SPACE toggle all matches, mouse click near matched keypoint shows that pair, q/ESC quit" << std::endl;

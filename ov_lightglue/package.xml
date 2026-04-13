@@ -21,6 +21,7 @@
   <depend condition="$ROS_VERSION == 1">ov_core</depend>
   <depend condition="$ROS_VERSION == 1">ov_init</depend>
   <depend condition="$ROS_VERSION == 1">ov_eval</depend>
+  <depend condition="$ROS_VERSION == 1">ov_msckf</depend>
 
   <buildtool_depend condition="$ROS_VERSION == 2">ament_cmake</buildtool_depend>
   <depend condition="$ROS_VERSION == 2">rclcpp</depend>

@@ -16,6 +16,7 @@
 
 #include <cstdlib>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -78,9 +79,10 @@ void draw_overlay(cv::Mat &frame_bgr, const std::vector<size_t> &curr_ids, const
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc < 7) {
+  if (argc < 8) {
     std::cerr << "Usage: " << argv[0]
-              << " <unused_superpoint_path> <unused_lightglue_path> <unused_use_gpu={0,1}> <bag> <image_topic> <output.mp4> [fps=20]" << std::endl;
+              << " <unused_superpoint_path> <unused_lightglue_path> <unused_use_gpu={0,1}> <bag> <image_topic> <output.mp4> <output.csv> [fps=20]"
+              << std::endl;
     return 2;
   }
 
@@ -93,7 +95,8 @@ int main(int argc, char **argv) {
   const std::string bag_path = argv[4];
   const std::string topic = argv[5];
   const std::string output_mp4 = argv[6];
-  const double out_fps = (argc >= 8) ? std::atof(argv[7]) : 20.0;
+  const std::string output_csv = argv[7];
+  const double out_fps = (argc >= 9) ? std::atof(argv[8]) : 20.0;
 
   if (out_fps <= 0.0) {
     std::cerr << "Invalid fps value: " << out_fps << std::endl;
@@ -116,6 +119,12 @@ int main(int argc, char **argv) {
     std::unique_ptr<ov_core::TrackKLT> tracker;
     std::unordered_map<size_t, cv::Point2f> prev_pts_by_id;
     cv::VideoWriter writer;
+    std::ofstream metrics(output_csv);
+    if (!metrics.is_open()) {
+      std::cerr << "Failed to open metrics csv: " << output_csv << std::endl;
+      return 4;
+    }
+    metrics << "frame,timestamp,active,carried,new\n";
 
     size_t frame_idx = 0;
     size_t used_msgs = 0;
@@ -168,6 +177,15 @@ int main(int argc, char **argv) {
       const auto obs_by_cam = tracker->get_last_obs();
       const std::vector<size_t> curr_ids = (ids_by_cam.count(0) > 0) ? ids_by_cam.at(0) : std::vector<size_t>{};
       const std::vector<cv::KeyPoint> curr_kpts = (obs_by_cam.count(0) > 0) ? obs_by_cam.at(0) : std::vector<cv::KeyPoint>{};
+      size_t carried = 0;
+      for (size_t i = 0; i < curr_ids.size() && i < curr_kpts.size(); ++i) {
+        if (prev_pts_by_id.find(curr_ids[i]) != prev_pts_by_id.end()) {
+          ++carried;
+        }
+      }
+      const size_t active = curr_ids.size();
+      const size_t fresh = (active >= carried) ? (active - carried) : 0;
+      metrics << frame_idx << "," << data.timestamp << "," << active << "," << carried << "," << fresh << "\n";
 
       cv::Mat frame_bgr;
       cv::cvtColor(img_gray, frame_bgr, cv::COLOR_GRAY2BGR);
@@ -193,9 +211,10 @@ int main(int argc, char **argv) {
     }
 
     writer.release();
+    metrics.close();
     bag.close();
 
-    std::cout << "Done. frames_written=" << frame_idx << " output=" << output_mp4 << std::endl;
+    std::cout << "Done. frames_written=" << frame_idx << " output=" << output_mp4 << " metrics=" << output_csv << std::endl;
   } catch (const std::exception &e) {
     std::cerr << "track_fast_bag_to_mp4 failed: " << e.what() << std::endl;
     return 5;

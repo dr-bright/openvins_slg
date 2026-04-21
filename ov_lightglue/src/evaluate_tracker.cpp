@@ -1,10 +1,19 @@
 /*
- * Rosbag to MP4 visualization tool for FAST+KLT TrackKLT.
+ * Rosbag to MP4 visualization tool.
+ * Compile-time selectable tracker implementation.
  */
 
 #include "cam/CamRadtan.h"
-#include "track/TrackKLT.h"
+#include "track/TrackBase.h"
 #include "utils/sensor_data.h"
+
+#if defined(OVLG_TRACKER_SLG)
+#include "track/TrackSuperLightGlue.h"
+#elif defined(OVLG_TRACKER_KLT)
+#include "track/TrackKLT.h"
+#else
+#error "Define one of OVLG_TRACKER_SLG or OVLG_TRACKER_KLT"
+#endif
 
 #include <Eigen/Core>
 
@@ -19,6 +28,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <algorithm>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -62,10 +72,10 @@ void draw_overlay(cv::Mat &frame_bgr, const std::vector<size_t> &curr_ids, const
     auto it = prev_pts_by_id.find(id);
     if (it != prev_pts_by_id.end()) {
       ++carried;
-      cv::line(frame_bgr, it->second, curr, cv::Scalar(255, 0, 0), 1, cv::LINE_AA); // blue match line
-      cv::circle(frame_bgr, curr, 2, cv::Scalar(0, 255, 0), cv::FILLED, cv::LINE_AA); // green carried
+      cv::line(frame_bgr, it->second, curr, cv::Scalar(255, 0, 0), 1, cv::LINE_AA);
+      cv::circle(frame_bgr, curr, 2, cv::Scalar(0, 255, 0), cv::FILLED, cv::LINE_AA);
     } else {
-      cv::circle(frame_bgr, curr, 2, cv::Scalar(0, 0, 255), cv::FILLED, cv::LINE_AA); // red new/current
+      cv::circle(frame_bgr, curr, 2, cv::Scalar(0, 0, 255), cv::FILLED, cv::LINE_AA);
     }
   }
 
@@ -76,32 +86,96 @@ void draw_overlay(cv::Mat &frame_bgr, const std::vector<size_t> &curr_ids, const
   cv::putText(frame_bgr, text, cv::Point(10, 24), cv::FONT_HERSHEY_SIMPLEX, 0.65, cv::Scalar(255, 255, 255), 2, cv::LINE_AA);
 }
 
+double infer_fps_from_bag(rosbag::View &view) {
+  std::vector<double> timestamps;
+  timestamps.reserve(300);
+  for (const rosbag::MessageInstance &m : view) {
+    sensor_msgs::ImageConstPtr img_msg = m.instantiate<sensor_msgs::Image>();
+    if (!img_msg) {
+      continue;
+    }
+    timestamps.push_back(img_msg->header.stamp.toSec());
+    if (timestamps.size() >= 300) {
+      break;
+    }
+  }
+
+  std::vector<double> dts;
+  dts.reserve(timestamps.size());
+  for (size_t i = 1; i < timestamps.size(); ++i) {
+    const double dt = timestamps[i] - timestamps[i - 1];
+    if (dt > 1e-6) {
+      dts.push_back(dt);
+    }
+  }
+
+  if (dts.empty()) {
+    return 0.0;
+  }
+
+  std::sort(dts.begin(), dts.end());
+  const double median_dt = dts[dts.size() / 2];
+  if (median_dt <= 1e-6) {
+    return 0.0;
+  }
+  return std::round(1.0 / median_dt);
+}
+
+std::unique_ptr<ov_core::TrackBase> create_tracker(const cv::Mat &img_gray, const std::string &superpoint_onnx_path,
+                                                   const std::string &lightglue_onnx_path, bool use_gpu) {
+  std::unordered_map<size_t, std::shared_ptr<ov_core::CamBase>> cameras;
+  auto cam = std::make_shared<ov_core::CamRadtan>(img_gray.cols, img_gray.rows);
+  Eigen::Matrix<double, 8, 1> calib;
+  calib << 300.0, 300.0, static_cast<double>(img_gray.cols) * 0.5, static_cast<double>(img_gray.rows) * 0.5, 0.0, 0.0, 0.0, 0.0;
+  cam->set_value(calib);
+  cameras.insert({0, cam});
+
+#if defined(OVLG_TRACKER_SLG)
+  ov_lightglue::TrackSuperLightGlueConfig cfg;
+  cfg.superpoint_onnx_path = superpoint_onnx_path;
+  cfg.lightglue_onnx_path = lightglue_onnx_path;
+  cfg.use_gpu = use_gpu;
+  cfg.max_keypoints = 1024;
+  cfg.detect_min_confidence = -1.0f;
+  cfg.match_min_confidence = -1.0f;
+
+  return std::unique_ptr<ov_core::TrackBase>(
+      new ov_lightglue::TrackSuperLightGlue(cameras, 300, 0, false, ov_core::TrackBase::HistogramMethod::NONE, cfg));
+#else
+  (void)superpoint_onnx_path;
+  (void)lightglue_onnx_path;
+  (void)use_gpu;
+  const int fast_threshold = 20;
+  const int grid_x = 5;
+  const int grid_y = 5;
+  const int min_px_dist = 10;
+  return std::unique_ptr<ov_core::TrackBase>(new ov_core::TrackKLT(cameras, 300, 0, false, ov_core::TrackBase::HistogramMethod::NONE,
+                                                                    fast_threshold, grid_x, grid_y, min_px_dist));
+#endif
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
+#if defined(OVLG_TRACKER_SLG)
+  const char *usage = " <superpoint.onnx> <lightglue.onnx> <use_gpu={0,1}> <bag> <image_topic> <output.mp4> <output.csv>";
+#else
+  const char *usage =
+      " <unused_superpoint_path> <unused_lightglue_path> <unused_use_gpu={0,1}> <bag> <image_topic> <output.mp4> <output.csv>";
+#endif
+
   if (argc < 8) {
-    std::cerr << "Usage: " << argv[0]
-              << " <unused_superpoint_path> <unused_lightglue_path> <unused_use_gpu={0,1}> <bag> <image_topic> <output.mp4> <output.csv> [fps=20]"
-              << std::endl;
+    std::cerr << "Usage: " << argv[0] << usage << std::endl;
     return 2;
   }
 
   const std::string superpoint_onnx_path = argv[1];
   const std::string lightglue_onnx_path = argv[2];
   const bool use_gpu = (std::atoi(argv[3]) != 0);
-  (void)superpoint_onnx_path;
-  (void)lightglue_onnx_path;
-  (void)use_gpu;
   const std::string bag_path = argv[4];
   const std::string topic = argv[5];
   const std::string output_mp4 = argv[6];
   const std::string output_csv = argv[7];
-  const double out_fps = (argc >= 9) ? std::atof(argv[8]) : 20.0;
-
-  if (out_fps <= 0.0) {
-    std::cerr << "Invalid fps value: " << out_fps << std::endl;
-    return 2;
-  }
 
   try {
     rosbag::Bag bag;
@@ -113,10 +187,17 @@ int main(int argc, char **argv) {
       return 3;
     }
 
+    double out_fps = infer_fps_from_bag(view);
+    if (out_fps <= 0.0) {
+      std::cerr << "Unable to infer FPS from rosbag timestamps." << std::endl;
+      return 3;
+    }
+    std::cout << "Inferred output fps=" << out_fps << std::endl;
+
     bool tracker_initialized = false;
     bool writer_initialized = false;
 
-    std::unique_ptr<ov_core::TrackKLT> tracker;
+    std::unique_ptr<ov_core::TrackBase> tracker;
     std::unordered_map<size_t, cv::Point2f> prev_pts_by_id;
     cv::VideoWriter writer;
     std::ofstream metrics(output_csv);
@@ -141,19 +222,7 @@ int main(int argc, char **argv) {
       }
 
       if (!tracker_initialized) {
-        std::unordered_map<size_t, std::shared_ptr<ov_core::CamBase>> cameras;
-        auto cam = std::make_shared<ov_core::CamRadtan>(img_gray.cols, img_gray.rows);
-        Eigen::Matrix<double, 8, 1> calib;
-        calib << 300.0, 300.0, static_cast<double>(img_gray.cols) * 0.5, static_cast<double>(img_gray.rows) * 0.5, 0.0, 0.0, 0.0, 0.0;
-        cam->set_value(calib);
-        cameras.insert({0, cam});
-
-        const int fast_threshold = 20;
-        const int grid_x = 5;
-        const int grid_y = 5;
-        const int min_px_dist = 10;
-        tracker.reset(new ov_core::TrackKLT(cameras, 300, 0, false, ov_core::TrackBase::HistogramMethod::NONE, fast_threshold, grid_x,
-                                            grid_y, min_px_dist));
+        tracker = create_tracker(img_gray, superpoint_onnx_path, lightglue_onnx_path, use_gpu);
         tracker_initialized = true;
       }
 
@@ -216,7 +285,11 @@ int main(int argc, char **argv) {
 
     std::cout << "Done. frames_written=" << frame_idx << " output=" << output_mp4 << " metrics=" << output_csv << std::endl;
   } catch (const std::exception &e) {
+#if defined(OVLG_TRACKER_SLG)
+    std::cerr << "track_superlightglue_bag_to_mp4 failed: " << e.what() << std::endl;
+#else
     std::cerr << "track_fast_bag_to_mp4 failed: " << e.what() << std::endl;
+#endif
     return 5;
   }
 

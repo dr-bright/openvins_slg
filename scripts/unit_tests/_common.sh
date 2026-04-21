@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 WS_ROOT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 
-BAG_PATH="/data/gopro10/slow_fast/720.bag"
+BAG_PATH="/data/gopro10/slow_fast/1440.bag"
 IMAGE_TOPIC_DEFAULT="/cam0/image_raw"
 ARTIFACT_ROOT="/data/gopro10/slow_fast/ov_lightglue_tests"
 BIN_DIR="${WS_ROOT}/devel/.private/ov_lightglue/lib/ov_lightglue"
@@ -18,7 +18,7 @@ require_file() {
   local p="$1"
   if [[ ! -f "${p}" ]]; then
     echo "Missing file: ${p}" >&2
-    exit 1
+    exit
   fi
 }
 

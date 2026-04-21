@@ -14,7 +14,7 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(catkin QUIET COMPONENTS roscpp rosbag ov_core ov_init ov_eval ov_msckf)
+find_package(catkin QUIET COMPONENTS roscpp rosbag geometry_msgs nav_msgs ov_core ov_init ov_eval ov_msckf)
 find_package(ament_cmake QUIET)
 
 if (catkin_FOUND AND ENABLE_ROS)
@@ -22,7 +22,7 @@ if (catkin_FOUND AND ENABLE_ROS)
   set(OV_MSCKF_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../open_vins/ov_msckf/src)
   catkin_package(
     INCLUDE_DIRS src
-    CATKIN_DEPENDS roscpp rosbag ov_core ov_init ov_eval ov_msckf
+    CATKIN_DEPENDS roscpp rosbag geometry_msgs nav_msgs ov_core ov_init ov_eval ov_msckf
   )
   include_directories(
     src
@@ -99,32 +99,61 @@ if (catkin_FOUND AND ENABLE_ROS)
     ${ONNXRUNTIME_LIB}
   )
 
-  add_executable(track_superlightglue_smoke_test
-    tests/track_superlightglue_smoke_test.cpp
+  add_executable(track_slg_smoke_test
+    tests/track_slg_smoke_test.cpp
   )
-  target_link_libraries(track_superlightglue_smoke_test
+  target_link_libraries(track_slg_smoke_test
     ${PROJECT_NAME}
     ${catkin_LIBRARIES}
     ${OpenCV_LIBRARIES}
     ${ONNXRUNTIME_LIB}
   )
 
-  add_executable(track_superlightglue_bag_to_mp4
-    tests/track_superlightglue_bag_to_mp4.cpp
+  add_executable(evaluate_tracker_slg
+    src/evaluate_tracker.cpp
   )
-  target_link_libraries(track_superlightglue_bag_to_mp4
+  target_compile_definitions(evaluate_tracker_slg PRIVATE OVLG_TRACKER_SLG=1)
+  target_link_libraries(evaluate_tracker_slg
     ${PROJECT_NAME}
     ${catkin_LIBRARIES}
     ${OpenCV_LIBRARIES}
     ${ONNXRUNTIME_LIB}
   )
 
-  add_executable(track_fast_bag_to_mp4
-    tests/track_fast_bag_to_mp4.cpp
+  add_executable(evaluate_tracker_klt
+    src/evaluate_tracker.cpp
   )
-  target_link_libraries(track_fast_bag_to_mp4
+  target_compile_definitions(evaluate_tracker_klt PRIVATE OVLG_TRACKER_KLT=1)
+  target_link_libraries(evaluate_tracker_klt
+    ${PROJECT_NAME}
     ${catkin_LIBRARIES}
     ${OpenCV_LIBRARIES}
+    ${ONNXRUNTIME_LIB}
+  )
+
+  add_executable(optimize_confidence
+    src/optimize_confidence.cpp
+  )
+  target_link_libraries(optimize_confidence
+    ${PROJECT_NAME}
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBRARIES}
+    ${ONNXRUNTIME_LIB}
+  )
+
+  add_executable(evaluate_estimator
+    src/evaluate_estimator.cpp
+  )
+  target_link_libraries(evaluate_estimator
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBRARIES}
+  )
+
+  add_executable(pose_to_file
+    src/pose_to_file.cpp
+  )
+  target_link_libraries(pose_to_file
+    ${catkin_LIBRARIES}
   )
 
   if (OV_MSCKF_LIB)

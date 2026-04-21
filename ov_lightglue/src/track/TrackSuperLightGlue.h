@@ -155,7 +155,7 @@ protected:
    */
   static void append_descriptor_row(const cv::Mat &source_desc, int row_idx, cv::Mat &out_desc);
 
-private:
+protected:
   std::unique_ptr<slg_backend> backend_;
   TrackSuperLightGlueConfig config_;
   std::unordered_map<size_t, cv::Mat> desc_last_;

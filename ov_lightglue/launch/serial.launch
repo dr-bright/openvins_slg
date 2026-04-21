@@ -1,0 +1,142 @@
+<launch>
+
+    <!-- what config we are going to run (should match folder name) -->
+    <arg name="verbosity"   default="INFO" /> <!-- ALL, DEBUG, INFO, WARNING, ERROR, SILENT -->
+    <arg name="config"      default="euroc_mav" /> <!-- euroc_mav, tum_vi, rpng_aruco, kaist, gopro10 -->
+    <arg name="config_path" default="$(find ov_lightglue)/../config/$(arg config)/estimator_config.yaml" />
+
+    <!-- mono or stereo and what ros bag to play -->
+    <arg name="max_cameras" default="1" />
+    <arg name="use_stereo"  default="false" />
+    <arg name="bag_start"   default="0" /> <!-- v1-2: 0, mh1: 40, mh2: 35, mh3: 17.5, mh4-5: 15 -->
+    <arg name="dataset"     default="V1_01_easy" /> <!-- V1_01_easy, V1_02_medium, V1_03_difficult, V2_02_medium -->
+    <!-- <arg name="bag"         default="/media/patrick/RPNG FLASH 3/$(arg config)/$(arg dataset).bag" /> -->
+    <arg name="bag"         default="/home/patrick/datasets/$(arg config)/$(arg dataset).bag" />
+    <!-- <arg name="bag"         default="/datasets/$(arg config)/$(arg dataset).bag" /> -->
+    <arg name="topic_imu"     default="/imu0" />
+    <arg name="topic_camera0" default="/cam0/image_raw" />
+    <arg name="topic_camera1" default="/cam1/image_raw" />
+
+    <!-- saving trajectory path and timing information -->
+    <arg name="dosave"      default="false" />
+    <arg name="dotime"      default="false" />
+    <arg name="doeval"      default="false" />
+    <arg name="doviz"       default="false" />
+    <arg name="path_est"    default="/tmp/traj_estimate.txt" />
+    <arg name="path_time"   default="/tmp/traj_timing.txt" />
+    <arg name="path_metrics" default="/tmp/ov_metrics.csv" />
+    <arg name="viz_path"    default="/tmp/ov_estimator_viz.mp4" />
+    <arg name="vis_fps"     default="20" />
+
+    <!-- if we should viz the groundtruth -->
+    <arg name="dolivetraj"  default="false" />
+    <arg name="path_gt"     default="$(find ov_data)/$(arg config)/$(arg dataset).txt" />
+
+    <!-- SuperPoint + LightGlue model paths -->
+    <arg name="slg_superpoint_onnx_path" default="$(find ov_lightglue)/../onnx/weights_latest/superpoint.onnx" />
+    <arg name="slg_lightglue_onnx_path"  default="$(find ov_lightglue)/../onnx/weights_latest/superpoint_lightglue_fused_cpu.onnx" />
+
+    <!-- SLG runtime knobs -->
+    <arg name="slg_use_gpu" default="false" />
+    <arg name="slg_max_keypoints" default="1024" />
+    <arg name="slg_detect_min_confidence" default="-1.0" />
+    <arg name="slg_match_min_confidence" default="-1.0" />
+    <arg name="slg_enable_temporal_ransac" default="true" />
+    <arg name="slg_temporal_ransac_min_matches" default="20" />
+    <arg name="slg_temporal_ransac_min_inliers" default="12" />
+    <arg name="slg_temporal_ransac_threshold_px" default="2.0" />
+    <arg name="slg_temporal_ransac_confidence" default="0.99" />
+    <arg name="slg_min_feature_distance_px" default="10" />
+    <arg name="slg_refill_tracks" default="true" />
+
+    <!-- MASTER NODE! -->
+<!--    <node name="ov_msckf" pkg="ov_lightglue" type="ros1_serial_msckf_lightglue" output="screen" clear_params="true" required="true" launch-prefix="gdb -ex run &#45;&#45;args">-->
+    <node name="ov_msckf" pkg="ov_lightglue" type="ros1_serial_msckf_lightglue" output="screen" clear_params="true" required="true">
+
+        <!-- bag parameters -->
+        <param name="path_bag"                 type="str"    value="$(arg bag)" />
+        <param name="bag_start"                type="double" value="$(arg bag_start)" />
+        <param name="bag_durr"                 type="int"    value="-1" />
+        <param name="topic_imu"                type="str"    value="$(arg topic_imu)" />
+        <param name="topic_camera0"            type="str"    value="$(arg topic_camera0)" />
+        <param name="topic_camera1"            type="str"    value="$(arg topic_camera1)" />
+
+        <!-- master configuration object -->
+        <param name="verbosity"                 type="str"    value="$(arg verbosity)" />
+        <param name="config_path"               type="str"    value="$(arg config_path)" />
+
+        <!-- world/filter parameters -->
+        <param name="use_stereo"                type="bool"   value="$(arg use_stereo)" />
+        <param name="max_cameras"               type="int"    value="$(arg max_cameras)" />
+
+        <!-- timing statistics recording -->
+        <param name="record_timing_information" type="bool"   value="$(arg dotime)" />
+        <param name="record_timing_filepath"    type="str"    value="$(arg path_time)" />
+
+        <!-- SLG tracker params -->
+        <param name="slg_superpoint_onnx_path"      type="str"    value="$(arg slg_superpoint_onnx_path)" />
+        <param name="slg_lightglue_onnx_path"       type="str"    value="$(arg slg_lightglue_onnx_path)" />
+        <param name="slg_use_gpu"                   type="bool"   value="$(arg slg_use_gpu)" />
+        <param name="slg_max_keypoints"             type="int"    value="$(arg slg_max_keypoints)" />
+        <param name="slg_detect_min_confidence"     type="double" value="$(arg slg_detect_min_confidence)" />
+        <param name="slg_match_min_confidence"      type="double" value="$(arg slg_match_min_confidence)" />
+        <param name="slg_enable_temporal_ransac"    type="bool"   value="$(arg slg_enable_temporal_ransac)" />
+        <param name="slg_temporal_ransac_min_matches" type="int"  value="$(arg slg_temporal_ransac_min_matches)" />
+        <param name="slg_temporal_ransac_min_inliers" type="int"  value="$(arg slg_temporal_ransac_min_inliers)" />
+        <param name="slg_temporal_ransac_threshold_px" type="double" value="$(arg slg_temporal_ransac_threshold_px)" />
+        <param name="slg_temporal_ransac_confidence" type="double" value="$(arg slg_temporal_ransac_confidence)" />
+        <param name="slg_min_feature_distance_px"   type="int"    value="$(arg slg_min_feature_distance_px)" />
+        <param name="slg_refill_tracks"             type="bool"   value="$(arg slg_refill_tracks)" />
+
+    </node>
+
+    <!-- record the trajectory if enabled -->
+    <group if="$(arg dosave)">
+        <node name="recorder_estimate" pkg="ov_eval" type="pose_to_file" output="screen" required="true">
+            <param name="topic"      type="str" value="/ov_msckf/poseimu" />
+            <param name="topic_type" type="str" value="PoseWithCovarianceStamped" />
+            <param name="output"     type="str" value="$(arg path_est)" />
+        </node>
+    </group>
+
+    <!-- record runtime metrics if enabled -->
+    <group if="$(arg doeval)">
+        <node name="record_metrics" pkg="ov_lightglue" type="record_metrics" output="screen" required="true">
+            <param name="output_csv"         type="str"    value="$(arg path_metrics)" />
+            <param name="topic_pose"         type="str"    value="/ov_msckf/poseimu" />
+            <param name="topic_odom"         type="str"    value="/ov_msckf/odomimu" />
+            <param name="topic_points_slam"  type="str"    value="/ov_msckf/points_slam" />
+            <param name="topic_points_msckf" type="str"    value="/ov_msckf/points_msckf" />
+            <param name="topic_points_aruco" type="str"    value="/ov_msckf/points_aruco" />
+            <param name="topic_pose_gt"      type="str"    value="/ov_msckf/posegt" />
+            <param name="max_gt_time_diff_sec" type="double" value="0.05" />
+        </node>
+    </group>
+
+    <!-- record estimator visualization mp4 if enabled -->
+    <group if="$(arg doviz)">
+        <node name="record_estimator_viz" pkg="ov_lightglue" type="record_estimator_viz" output="screen" required="true">
+            <param name="output_mp4"         type="str"    value="$(arg viz_path)" />
+            <param name="fps"                type="double" value="$(arg vis_fps)" />
+            <param name="topic_image"        type="str"    value="/ov_msckf/trackhist" />
+            <param name="topic_loop_feats"   type="str"    value="/ov_msckf/loop_feats" />
+            <param name="topic_points_slam"  type="str"    value="/ov_msckf/points_slam" />
+            <param name="topic_points_msckf" type="str"    value="/ov_msckf/points_msckf" />
+            <param name="topic_points_aruco" type="str"    value="/ov_msckf/points_aruco" />
+            <param name="topic_pose"         type="str"    value="/ov_msckf/poseimu" />
+            <param name="topic_odom"         type="str"    value="/ov_msckf/odomimu" />
+            <param name="max_sync_time_diff_sec" type="double" value="0.10" />
+            <param name="slam_assoc_threshold_m" type="double" value="0.10" />
+        </node>
+    </group>
+
+    <!-- path viz of aligned gt -->
+    <group if="$(arg dolivetraj)">
+        <node name="live_align_trajectory" pkg="ov_eval" type="live_align_trajectory" output="log" clear_params="true">
+            <param name="alignment_type" type="str" value="posyaw" />
+            <param name="path_gt"        type="str" value="$(arg path_gt)" />
+        </node>
+    </group>
+
+
+</launch>

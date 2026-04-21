@@ -60,12 +60,12 @@ def main() -> int:
         print("")
 
     # Figure 1: feature counts.
-    plt.figure("Feature Count", figsize=(11, 5))
+    plt.figure("Active feature Count", figsize=(11, 5))
     for label, df in datasets:
-        plt.plot(df["frame"], df["active"], linewidth=1.5, label=label)
-    plt.title("Feature Count per Frame")
+        plt.plot(df["frame"], df["carried"], linewidth=1.5, label=label)
+    plt.title("Carried (active) feature Count per Frame")
     plt.xlabel("Frame")
-    plt.ylabel("Active Features")
+    plt.ylabel("Carried (active) features")
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()

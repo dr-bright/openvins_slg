@@ -713,4 +713,6 @@ void VioManagerSLG::do_feature_propagate_update(const ov_core::CameraData &messa
                state->_calib_imu_tg->value()(4), state->_calib_imu_tg->value()(5), state->_calib_imu_tg->value()(6),
                state->_calib_imu_tg->value()(7), state->_calib_imu_tg->value()(8));
   }
+
+  PRINT_INFO(YELLOW "total of %zu SLAM features in state\n", state->_features_SLAM.size());
 }

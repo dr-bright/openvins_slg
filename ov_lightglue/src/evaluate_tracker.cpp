@@ -1,6 +1,25 @@
 /*
  * Rosbag to MP4 visualization tool.
  * Compile-time selectable tracker implementation.
+  rosrun ov_lightglue evaluate_tracker_klt \
+    /root/catkin_ws/src/openvins_lightglue/onnx/weights_latest/superpoint.onnx \
+    /root/catkin_ws/src/openvins_lightglue/onnx/weights_latest/superpoint_lightglue_fused_cpu.onnx \
+    1 \
+    /data/gopro10/slow_fast/1440.bag \
+    /cam0/image_raw \
+    /data/gopro10/slow_fast/ov_lightglue_tests/klt_eval.mp4 \
+    /data/gopro10/slow_fast/ov_lightglue_tests/klt_metrics.csv \
+    16
+  
+  rosrun ov_lightglue evaluate_tracker_slg \
+    /root/catkin_ws/src/openvins_lightglue/onnx/weights_latest/superpoint.onnx \
+    /root/catkin_ws/src/openvins_lightglue/onnx/weights_latest/superpoint_lightglue_fused_cpu.onnx \
+    1 \
+    /data/gopro10/slow_fast/1440.bag \
+    /cam0/image_raw \
+    /data/gopro10/slow_fast/ov_lightglue_tests/slg_eval.mp4 \
+    /data/gopro10/slow_fast/ov_lightglue_tests/slg_metrics.csv \
+    16
  */
 
 #include "cam/CamRadtan.h"
@@ -29,7 +48,9 @@
 #include <iostream>
 #include <memory>
 #include <algorithm>
+#include <deque>
 #include <string>
+#include <unordered_set>
 #include <unordered_map>
 #include <vector>
 
@@ -158,10 +179,10 @@ std::unique_ptr<ov_core::TrackBase> create_tracker(const cv::Mat &img_gray, cons
 
 int main(int argc, char **argv) {
 #if defined(OVLG_TRACKER_SLG)
-  const char *usage = " <superpoint.onnx> <lightglue.onnx> <use_gpu={0,1}> <bag> <image_topic> <output.mp4> <output.csv>";
+  const char *usage = " <superpoint.onnx> <lightglue.onnx> <use_gpu={0,1}> <bag> <image_topic> <output.mp4> <output.csv> [P=16]";
 #else
   const char *usage =
-      " <unused_superpoint_path> <unused_lightglue_path> <unused_use_gpu={0,1}> <bag> <image_topic> <output.mp4> <output.csv>";
+      " <unused_superpoint_path> <unused_lightglue_path> <unused_use_gpu={0,1}> <bag> <image_topic> <output.mp4> <output.csv> [P=16]";
 #endif
 
   if (argc < 8) {
@@ -176,6 +197,13 @@ int main(int argc, char **argv) {
   const std::string topic = argv[5];
   const std::string output_mp4 = argv[6];
   const std::string output_csv = argv[7];
+  size_t max_generation = 16;
+  if (argc >= 9) {
+    const int parsed = std::atoi(argv[8]);
+    if (parsed > 0) {
+      max_generation = static_cast<size_t>(parsed);
+    }
+  }
 
   try {
     rosbag::Bag bag;
@@ -199,13 +227,18 @@ int main(int argc, char **argv) {
 
     std::unique_ptr<ov_core::TrackBase> tracker;
     std::unordered_map<size_t, cv::Point2f> prev_pts_by_id;
+    std::deque<std::unordered_set<size_t>> id_history;
     cv::VideoWriter writer;
     std::ofstream metrics(output_csv);
     if (!metrics.is_open()) {
       std::cerr << "Failed to open metrics csv: " << output_csv << std::endl;
       return 4;
     }
-    metrics << "frame,timestamp,active,carried,new\n";
+    metrics << "frame,timestamp";
+    for (size_t g = 0; g <= max_generation; ++g) {
+      metrics << ",gen" << g;
+    }
+    metrics << "\n";
 
     size_t frame_idx = 0;
     size_t used_msgs = 0;
@@ -246,15 +279,48 @@ int main(int argc, char **argv) {
       const auto obs_by_cam = tracker->get_last_obs();
       const std::vector<size_t> curr_ids = (ids_by_cam.count(0) > 0) ? ids_by_cam.at(0) : std::vector<size_t>{};
       const std::vector<cv::KeyPoint> curr_kpts = (obs_by_cam.count(0) > 0) ? obs_by_cam.at(0) : std::vector<cv::KeyPoint>{};
-      size_t carried = 0;
-      for (size_t i = 0; i < curr_ids.size() && i < curr_kpts.size(); ++i) {
-        if (prev_pts_by_id.find(curr_ids[i]) != prev_pts_by_id.end()) {
-          ++carried;
-        }
+
+      std::unordered_set<size_t> curr_id_set;
+      curr_id_set.reserve(curr_ids.size());
+      for (size_t id : curr_ids) {
+        curr_id_set.insert(id);
       }
-      const size_t active = curr_ids.size();
-      const size_t fresh = (active >= carried) ? (active - carried) : 0;
-      metrics << frame_idx << "," << data.timestamp << "," << active << "," << carried << "," << fresh << "\n";
+
+      // at_least[g] = number of current features that are continuously present for >= g frames in the past.
+      // Build this by chained intersections to prevent discontinuity overcounting if IDs are reused.
+      std::vector<size_t> at_least(max_generation + 1, 0);
+      std::unordered_set<size_t> alive_chain = curr_id_set;
+      for (size_t g = 1; g <= max_generation; ++g) {
+        if (id_history.size() < g) {
+          break;
+        }
+        const auto &ids_g_back = id_history[id_history.size() - g];
+        std::unordered_set<size_t> next_chain;
+        next_chain.reserve(alive_chain.size());
+        for (size_t id : alive_chain) {
+          if (ids_g_back.find(id) != ids_g_back.end()) {
+            next_chain.insert(id);
+          }
+        }
+        alive_chain.swap(next_chain);
+        at_least[g] = alive_chain.size();
+      }
+
+      // gen0 = newly appeared this frame.
+      // genN (1..P-1) = exact lifetime N (non-overlapping bins).
+      // genP = tail bucket for lifetime >= P.
+      std::vector<size_t> gen_counts(max_generation + 1, 0);
+      gen_counts[0] = curr_id_set.size() - at_least[1];
+      for (size_t g = 1; g < max_generation; ++g) {
+        gen_counts[g] = at_least[g] - at_least[g + 1];
+      }
+      gen_counts[max_generation] = at_least[max_generation];
+
+      metrics << frame_idx << "," << data.timestamp;
+      for (size_t g = 0; g <= max_generation; ++g) {
+        metrics << "," << gen_counts[g];
+      }
+      metrics << "\n";
 
       cv::Mat frame_bgr;
       cv::cvtColor(img_gray, frame_bgr, cv::COLOR_GRAY2BGR);
@@ -265,6 +331,11 @@ int main(int argc, char **argv) {
       prev_pts_by_id.reserve(curr_ids.size());
       for (size_t i = 0; i < curr_ids.size() && i < curr_kpts.size(); ++i) {
         prev_pts_by_id[curr_ids[i]] = curr_kpts[i].pt;
+      }
+
+      id_history.push_back(std::move(curr_id_set));
+      if (id_history.size() > max_generation) {
+        id_history.pop_front();
       }
 
       ++frame_idx;

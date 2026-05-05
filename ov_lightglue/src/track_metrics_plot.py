@@ -182,28 +182,41 @@ def plot_all_splits(datasets: List[Dict], out_dir: Path, display_split: int) -> 
     return display, display
 
 
-def plot_lifetime_hist(datasets: List[Dict], out_dir: Path) -> plt.Figure:
+def plot_lifetime_hist_from(datasets: List[Dict], out_dir: Path, start_n: int) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(12, 5))
     max_p = max(dataset["P"] for dataset in datasets)
     width = 0.8 / max(1, len(datasets))
 
     for i, dataset in enumerate(datasets):
         P = dataset["P"]
-        totals = dataset["death"].sum(axis=0)[1:P+1]
+        totals = dataset["death"].sum(axis=0)[start_n:P+1]
         all_total = totals.sum()
-        xs = np.arange(1, P+1)
+        xs = np.arange(start_n, P + 1)
         offset = (i - (len(datasets) - 1) * 0.5) * width
-        ax.bar(xs + offset, totals / all_total, width=width, label=dataset["label"])
+        values = np.divide(totals, all_total, out=np.zeros_like(totals), where=all_total > 0)
+        ax.bar(xs + offset, values, width=width, label=dataset["label"])
 
-    ax.set_title("Feature death generation histogram")
+    ax.set_title(f"Feature death generation PDF from {start_n}")
     ax.set_xlabel("Generation at death")
-    ax.set_ylabel("Death count")
-    ax.set_xticks(np.arange(1, max_p + 1))
-    ax.set_xticklabels([str(i) for i in range(1, max_p + 1)])
+    ax.set_ylabel("Probability")
+    ax.set_xticks(np.arange(start_n, max_p + 1))
+    ax.set_xticklabels([str(i) for i in range(start_n, max_p)] + [f"{max_p}+"])
     ax.grid(True, axis="y", alpha=0.3)
     ax.legend()
-    save_figure(fig, out_dir, "lifetime_death_hist")
+    save_figure(fig, out_dir, f"lifetime_death_hist_from_{start_n}")
     return fig
+
+
+def plot_lifetime_hist_family(datasets: List[Dict], out_dir: Path, display_n: int) -> List[plt.Figure]:
+    display = []
+    max_start = min(dataset["P"] for dataset in datasets)
+    for start_n in range(1, max_start + 1):
+        fig = plot_lifetime_hist_from(datasets, out_dir, start_n)
+        if start_n == display_n:
+            display.append(fig)
+        else:
+            plt.close(fig)
+    return display
 
 
 def print_lifetime_stats(datasets: List[Dict]) -> None:
@@ -237,8 +250,7 @@ def main() -> int:
     print_lifetime_stats(datasets)
 
     figures, display_figures = plot_all_splits(datasets, out_dir, split_n)
-    hist_fig = plot_lifetime_hist(datasets, out_dir)
-    plt.close(hist_fig)
+    figures.extend(plot_lifetime_hist_family(datasets, out_dir, 2))
 
     if args.display:
         plt.show()

@@ -62,7 +62,7 @@ def load_metrics(csv_path: Path) -> Dict:
     df["frame"] = pd.to_numeric(df["frame"], errors="coerce")
     df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce")
     for col in gen_cols:
-      df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
     gen = df[gen_cols].to_numpy(dtype=float)
     all_count = gen.sum(axis=1)
@@ -80,6 +80,8 @@ def load_metrics(csv_path: Path) -> Dict:
         total_deaths = np.maximum(previous.sum(axis=1) - current[:, 1:].sum(axis=1), 0.0)
         lower_deaths = death[1:, :-1].sum(axis=1)
         death[1:, -1] = np.maximum(total_deaths - lower_deaths, 0.0)
+
+    add_per_frame_death_stats(df, death, len(gen_cols) - 1)
 
     return {
         "label": csv_path.stem,
@@ -106,6 +108,36 @@ def weighted_quantile(values: np.ndarray, weights: np.ndarray, quantiles: List[f
     weights = weights[order]
     cumulative = np.cumsum(weights)
     return np.interp(np.asarray(quantiles) * cumulative[-1], cumulative, values)
+
+
+def add_per_frame_death_stats(df: pd.DataFrame, death: np.ndarray, P: int) -> None:
+    values = np.arange(P, dtype=float)
+    weights_by_frame = death[:, :P]
+    quantiles = [0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
+
+    means = []
+    stds = []
+    quantile_rows = []
+    for weights in weights_by_frame:
+        total = weights.sum()
+        if total <= 0:
+            means.append(np.nan)
+            stds.append(np.nan)
+            quantile_rows.append(np.full(len(quantiles), np.nan))
+            continue
+
+        mean = np.average(values, weights=weights)
+        variance = np.average((values - mean) ** 2, weights=weights)
+        means.append(mean)
+        stds.append(np.sqrt(variance))
+        quantile_rows.append(weighted_quantile(values, weights, quantiles))
+
+    q = np.vstack(quantile_rows) if quantile_rows else np.empty((0, len(quantiles)))
+    df["mean_death"] = means
+    df["std_death"] = stds
+    df["median_death"] = q[:, 2] if len(q) else np.nan
+    for i, name in enumerate(["q10_death", "q25_death", "q50_death", "q75_death", "q90_death", "q95_death", "q99_death"]):
+        df[name] = q[:, i] if len(q) else np.nan
 
 
 def death_stats(dataset: Dict) -> Dict:
@@ -219,6 +251,28 @@ def plot_lifetime_hist_family(datasets: List[Dict], out_dir: Path, display_n: in
     return display
 
 
+def plot_death_mean_sigma(datasets: List[Dict], out_dir: Path) -> plt.Figure:
+    fig, ax = plt.subplots(figsize=(12, 5))
+
+    for dataset in datasets:
+        df = dataset["df"]
+        frames = df["frame"].to_numpy()
+        mean = df["mean_death"].to_numpy()
+        std = df["std_death"].to_numpy()
+        line, = ax.plot(frames, mean, linewidth=1.4, label=dataset["label"])
+        color = line.get_color()
+        ax.plot(frames, mean + 3.0 * std, linestyle="--", linewidth=0.9, color=color, alpha=0.8)
+        ax.plot(frames, np.maximum(mean - 3.0 * std, 0.0), linestyle="--", linewidth=0.9, color=color, alpha=0.8)
+
+    ax.set_title("Mean feature death generation per frame")
+    ax.set_xlabel("Frame")
+    ax.set_ylabel("Generation at death")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    save_figure(fig, out_dir, "death_generation_mean_sigma")
+    return fig
+
+
 def print_lifetime_stats(datasets: List[Dict]) -> None:
     for dataset in datasets:
         stats = death_stats(dataset)
@@ -251,6 +305,7 @@ def main() -> int:
 
     figures, display_figures = plot_all_splits(datasets, out_dir, split_n)
     figures.extend(plot_lifetime_hist_family(datasets, out_dir, 2))
+    figures.append(plot_death_mean_sigma(datasets, out_dir))
 
     if args.display:
         plt.show()

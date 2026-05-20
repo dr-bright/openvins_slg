@@ -1,5 +1,7 @@
 /onnx
 
+__pycache__/
+
 # Prerequisites
 *.d
 

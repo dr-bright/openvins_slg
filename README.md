@@ -1,6 +1,6 @@
-# openvins_lightglue
+# openvins_slg
 
-Extension workspace for OpenVINS that adds a custom visual frontend based on:
+Extension workspace for OpenVINS that adds a custom visual frontend named SLG based on:
 
 - SuperPoint keypoints + descriptors
 - LightGlue matching
@@ -10,14 +10,8 @@ Extension workspace for OpenVINS that adds a custom visual frontend based on:
 - `ov_lightglue`: catkin package that hosts tracking/frontend integration.
 
 ## Current status
-
-Scaffold initialized with:
-
-- package metadata (`package.xml`, `CMakeLists.txt`)
-- tracker interface header `ov_lightglue/src/track/TrackSuperLightGlue.h`
-
-No inference implementation (`.cpp`) is included yet.
+The contents of this repository migrated to new location https://github.com/dr-bright/openvins_slg_loop. The future developments of SLG will take place in that new OpenVINS fork.
 
 ## License
 
-This repository currently uses the OpenVINS project license (GPLv3), inherited for compatibility.
+This repository uses the OpenVINS project license GNU GPLv3.
